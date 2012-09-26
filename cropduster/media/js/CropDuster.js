@@ -29,18 +29,18 @@ window.CropDuster = {};
 		
 		win: null,
 		
-	    init: function() {
-	        // Deduce adminMediaPrefix by looking at the <script>s in the
-	        // current document and finding the URL of *this* module.
-	        var scripts = document.getElementsByTagName('script');
-	        for (var i=0; i<scripts.length; i++) {
-	            if (scripts[i].src.match(/addCropDuster/)) {
-	                var idx = scripts[i].src.indexOf('cropduster/js/addCropDuster');
-	                CropDuster.adminMediaPrefix = scripts[i].src.substring(0, idx);
-	                break;
-	            }
-	        }
-	    },
+		init: function() {
+			// Deduce adminMediaPrefix by looking at the <script>s in the
+			// current document and finding the URL of *this* module.
+			var scripts = document.getElementsByTagName('script');
+			for (var i=0; i<scripts.length; i++) {
+				if (scripts[i].src.match(/addCropDuster/)) {
+					var idx = scripts[i].src.indexOf('cropduster/js/addCropDuster');
+					CropDuster.adminMediaPrefix = scripts[i].src.substring(0, idx);
+					break;
+				}
+			}
+		},
 		
 		getVal: function(id, name) {
 			prefix = CropDuster.formsetPrefixes[id];
@@ -117,7 +117,7 @@ window.CropDuster = {};
 					}
 					var url = thumbUrls[name];
 					var className = "preview";
-					if (i == 0) {
+					if (i === 0) {
 						className += " first";
 					}
 					// Append random get variable so that it refreshes
@@ -128,17 +128,141 @@ window.CropDuster = {};
 				var previewId;
 				for (var formsetPrefix in CropDuster.formsetPrefixes) {
 					if (formsetPrefix != id) {
-						previewId = 'preview_id_' + formsetPrefix;
-						break;
+						if (CropDuster.formsetPrefixes[formsetPrefix] == prefix) {
+							previewId = 'preview_id_' + formsetPrefix;
+							break;
+						}
 					}
 				}
 				if (previewId) {
 					$('#' + previewId).html(html);
 				}
-
 			}
 		},
-		
+
+		/**
+		 * Takes an <input class="cropduster-data-field"/> element
+		 */
+		registerInput: function(input) {
+			var $input = $(input);
+			var data = $input.data();
+			var name = $input.attr('name');
+            var matches = name.match(/^(.*_set-\d+-)/);
+            if (matches) {
+                data.formsetPrefix = matches[1] + data.formsetPrefix;
+            }
+			CropDuster.sizes[name] = JSON.stringify(data.sizes);
+			CropDuster.autoSizes[name] = JSON.stringify(data.autoSizes);
+			CropDuster.minSize[name] = data.minSize;
+			CropDuster.defaultThumbs[name] = data.defaultThumb;
+			CropDuster.aspectRatios[name] = data.aspectRatio;
+			CropDuster.formsetPrefixes[name] = data.formsetPrefix;
+
+            // if (data.formsetPrefix == 'cropduster-image-content_type-object_id') {
+            // }
+
+			var $customField = $input.parent().find('> .cropduster-customfield');
+
+			$customField.click(function(e) {
+				e.preventDefault();
+				var $targetParent = $(e.target).closest('.row');
+				var $targetInput = $targetParent.find('input');
+				if (!$targetInput.length) {
+					return;
+				}
+				$targetInput = $($targetInput[0]);
+				var name = $targetInput.attr('name');
+				var imageId = $targetInput.val();
+				var formsetPrefix = CropDuster.formsetPrefixes[name];
+
+				if (name.indexOf(formsetPrefix) == -1) {
+					var $realInput = $('#id_' + formsetPrefix + '-0-id');
+					if ($realInput && $realInput.length) {
+						imageId = $realInput.val();
+						$targetParent = $realInput.closest('.row');
+					}
+				}
+
+				var fieldName = $targetParent.find('.cropduster-data-field').attr('name');
+				CropDuster.show(fieldName, CropDuster.uploadUrl, imageId);
+			});
+
+
+			var $parentForm = $input.parents('.cropduster-form');
+			if ($parentForm.length) {
+				$parentForm = $($parentForm[0]);
+			}
+
+            var matches = name.match(/(?:\d+|__prefix__|empty)\-([^\-]+)$/);
+            if (matches) {
+                name = matches[1];
+            }
+
+			var $inputRow = $input.parents('.row.' + name);
+			if ($inputRow.length) {
+				var inputLabel = $inputRow.find('label').html();
+				if (inputLabel) {
+					inputLabel = inputLabel.replace(/:$/, '');
+					$parentForm.find('h2.collapse-handler').each(function(header) {
+						header.innerHTML = inputLabel;
+					});
+				}
+                $inputRow.find('.cropduster-text-field').hide();
+			}
+
+			$parentForm.find('span.delete input').change(function() {
+				form = $(this).parents('.cropduster-form');
+				if (this.checked) {
+					form.addClass('pre-delete');
+				} else {
+					form.removeClass('pre-delete');
+				}
+			});
+			// Re-initialize thumbnail images. This is necessary in the event that
+			// that the cropduster admin form doesn't have an image id but has thumbnails
+			// (for example when a new image is uploaded and the post is saved, but there is
+			// a validation error on the page)
+			$parentForm.find('.id').each(function(i, el) {
+
+				if ($(el).parents('.inline-related').hasClass('empty-form')) {
+					return;
+				}
+
+				var idName = $(el).find('input').attr('name');
+
+				var matches = /^(.+)-0-id$/.exec(idName);
+				if (!matches || matches.length != 2) {
+					return;
+				}
+
+				var prefix = matches[1];
+				var path = $('#id_' + prefix + '-0-path').val();
+
+				ext = $('#id_' + prefix + '-0-_extension').val();
+				var html = '';
+				var defaultThumbName = CropDuster.defaultThumbs[prefix+'-0-id'];
+				$('#id_' + prefix + '-0-thumbs option').each(function(i, el) {
+					var name = $(el).html();
+					if (name != defaultThumbName) {
+						return;
+					}
+					var url = CropDuster.staticUrl + '/' + path + '/' + name + '.' + ext;
+					// This is in place of a negative lookbehind. It replaces all
+					// double slashes that don't follow a colon.
+					url = url.replace(/(:)?\/+/g, function($0, $1) { return $1 ? $0 : '/'; });
+					url += '?rand=' + CropDuster.generateRandomId();
+					var className = 'preview';
+					if (i === 0) {
+						className += ' first';
+					}
+					html += '<img id="id_' + prefix + '0--id_image_' + name + '" src="' + url + '" class="' + className + '" />';
+				});
+				$(el).find('cropduster-preview').html(html);
+				// $('#preview_id_' + idName).html(html);
+			});
+
+		},
+
 		generateRandomId: function() {
 			return ('000000000' + Math.ceil(Math.random()*1000000000).toString()).slice(-9);
 		}
@@ -148,77 +272,11 @@ window.CropDuster = {};
 	
 	$(document).ready(function(){
 
-		$('.cropduster-customfield').click(function(e) {
-			e.preventDefault();
-			var $targetParent = $(e.target).parents('.row.id');
-			var imageId = $targetParent.find('input').val();
-			var fieldName = $('.cropduster-id-field').attr('name');
-			CropDuster.show(fieldName, CropDuster.uploadUrl, imageId);
+		$('.cropduster-data-field').each(function(i, idField) {
+			CropDuster.registerInput(idField);
 		});
 
-		var $idField = $('.cropduster-id-field');
-		var idFieldName = $idField.attr('name');
-		var $idFieldRow = $idField.parents('.row.' + idFieldName);
-		if ($idFieldRow.length) {
-			var idFieldLabel = $idFieldRow.find('label').html();
-			if (idFieldLabel) {
-				idFieldLabel = idFieldLabel.replace(/:$/, '');
-				$('.cropduster-form').find('h2.collapse-handler').each(function(header) {
-					header.innerHTML = idFieldLabel;
-				});
-			}
-			$idFieldRow.hide();
-		}
 
-		$('.cropduster-form span.delete input').change(function() {
-			form = $(this).parents('.cropduster-form');
-			if (this.checked) {
-				form.addClass('pre-delete');
-			} else {
-				form.removeClass('pre-delete');
-			}
-		});
-		// Re-initialize thumbnail images. This is necessary in the event that
-		// that the cropduster admin form doesn't have an image id but has thumbnails
-		// (for example when a new image is uploaded and the post is saved, but there is
-		// a validation error on the page)
-		$('.cropduster-form .id').each(function(i, el) {
-			
-			if ($(el).parents('.inline-related').hasClass('empty-form')) {
-				return;
-			}
-			
-			var idName = $(el).find('input').attr('name');
-			
-			var matches = /^(.+)-0-id$/.exec(idName);
-			if (!matches || matches.length != 2) {
-				return;
-			}
-			
-			var prefix = matches[1];
-			var path = $('#id_' + prefix + '-0-path').val();
-			// This is in place of a negative lookbehind. It replaces all
-			// double slashes that don't follow a colon.
-			
-			ext = $('#id_' + prefix + '-0-_extension').val();
-			var html = '';
-			var defaultThumbName = CropDuster.defaultThumbs[prefix+'-0-id'];
-			$('#id_' + prefix + '-0-thumbs option').each(function(i, el) {
-				var name = $(el).html();
-				if (name != defaultThumbName) {
-					return;
-				}
-				var url = CropDuster.staticUrl + '/' + path + '/' + name + '.' + ext;
-				url = url.replace(/(:)?\/+/g, function($0, $1) { return $1 ? $0 : '/'; });
-				url += '?rand=' + CropDuster.generateRandomId();
-				var className = 'preview';
-				if (i == 0) {
-					className += ' first';
-				}
-				html += '<img id="id_' + prefix + '0--id_image_' + name + '" src="' + url + '" class="' + className + '" />';
-			});
-			$('#preview_id_' + idName).html(html);
-		});
 	});
 	
 })((typeof window.django != 'undefined') ? django.jQuery : jQuery);

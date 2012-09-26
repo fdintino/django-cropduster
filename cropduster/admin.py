@@ -1,6 +1,7 @@
 from django.contrib.contenttypes.generic import GenericInlineModelAdmin
 from cropduster.models import Image
-from cropduster.forms import BaseInlineFormSet, CropDusterFormField, CropDusterThumbField
+from cropduster.forms import (BaseInlineFormSet, CropDusterFormField,
+                              CropDusterThumbField,)
 
 
 class BaseImageInline(GenericInlineModelAdmin):
@@ -43,20 +44,38 @@ class BaseImageInline(GenericInlineModelAdmin):
         
         return super(BaseImageInline, self).formfield_for_manytomany(db_field, request, **kwargs)
 
-    def get_formset(self, request, obj=None):
-        formset = super(BaseImageInline, self).get_formset(request, obj)
-        formset.sizes = self.sizes
-        formset.auto_sizes = self.auto_sizes
-        formset.default_thumb = self.default_thumb
-        return formset
+    def get_formset(self, request, obj=None, nested=False):
+        if nested:
+            from .forms import cropduster_formset_factory
+            from .nested import nested_inline_formset_factory
+            formset = cropduster_formset_factory(self.sizes, self.auto_sizes, self.default_thumb,
+                model_cls=self.model, is_nested=True)
+            return nested_inline_formset_factory(formset)
+        else:
+            formset = super(BaseImageInline, self).get_formset(request, obj)
+            formset.sizes = self.sizes
+            formset.auto_sizes = self.auto_sizes
+            formset.default_thumb = self.default_thumb
+            return formset
 
 
-def cropduster_inline_factory(sizes, auto_sizes, default_thumb):
-    return type("CropDusterImageInline", (BaseImageInline,), {
+def cropduster_inline_factory(sizes, auto_sizes, default_thumb,
+                              model=None, formset=None, template=None):
+    attrs = {
         'sizes': sizes,
         'auto_sizes': auto_sizes,
-        'default_thumb': default_thumb,
-    })
+        'default_thumb': default_thumb,}
+
+    if model is not None:
+        attrs['model'] = model
+
+    if formset is not None:
+        attrs['formset'] = formset
+
+    if template is not None:
+        attrs['template'] = template
+
+    return type("CropDusterImageInline", (BaseImageInline,), attrs)
 
 
 # Retained for backwards compatibility, but imports of these classes from this module

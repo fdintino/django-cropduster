@@ -10,10 +10,16 @@ def patch_model_admin():
     def __init__(old_init, self, model, admin_site):
         fields = model._meta.get_m2m_with_model()
         for field, m in fields:
-            if hasattr(field, 'rel') and getattr(field.rel, 'to', None) == Image:
-                InlineFormSet = cropduster_inline_factory(
-                    field.sizes, field.auto_sizes, field.default_thumb)
-                self.inlines.append(InlineFormSet)
+            if hasattr(field, 'rel'):
+                rel_model = getattr(field.rel, 'to', None)
+                # Only check classes, otherwise we'll get a TypeError
+                if not isinstance(rel_model, type):
+                    continue
+                if issubclass(rel_model, Image):
+                    InlineFormSet = cropduster_inline_factory(
+                        field.sizes, field.auto_sizes, field.default_thumb,
+                        model=rel_model)
+                    self.inlines.append(InlineFormSet)
         old_init(self, model, admin_site);
 
     wrapfunc(ModelAdmin, '__init__', __init__)

@@ -54,6 +54,8 @@
 <!-- Get rid of nav -->
 {% block nav-global %}{% endblock %}
 
+{% block bodyclass %}{{ block.super }} cropduster-form{% endblock %}
+
 {% block content-class %}content-flexible{% endblock %}
 
 {% block breadcrumbs %}{% endblock %}

@@ -244,21 +244,28 @@ class CropDusterField(GenericRelation):
     sizes = None
     auto_sizes = None
     default_thumb = None
+    #: Whether to create retina sizes, if possible
+    retina = False
+
+    # Whether the field is currently being processed by South
+    south_executing = False
 
     def __init__(self, verbose_name=None, **kwargs):
         sizes = kwargs.pop('sizes', None)
         auto_sizes = kwargs.pop('auto_sizes', None)
         default_thumb = kwargs.pop('default_thumb', None)
+        self.retina = kwargs.pop('retina', False)
 
         if default_thumb is None:
-            raise ValueError("default_thumb attribute must be defined.")
+            try:
+                self.default_thumb = sizes.keys()[0]
+            except:
+                raise ValueError("default_thumb attribute must be defined.")
 
         default_thumb_key_exists = False
 
         try:
             self._sizes_validate(sizes)
-            if default_thumb in sizes.keys():
-                default_thumb_key_exists = True
         except ValueError as e:
             # Maybe the sizes is none and the auto_sizes is valid, let's
             # try that
@@ -267,11 +274,22 @@ class CropDusterField(GenericRelation):
             except:
                 # raise the original exception
                 raise e
+        else:
+            if default_thumb in sizes.keys():
+                default_thumb_key_exists = True
+            if self.retina:
+                for size_name, (size_w, size_h) in sizes.items():
+                    retina_size_name = '%s@2x' % size_name
+                    sizes.update({retina_size_name: (2*size_w, 2*size_h)})
 
         if auto_sizes is not None:
             self._sizes_validate(auto_sizes, is_auto=True)
             if default_thumb in auto_sizes.keys():
                 default_thumb_key_exists = True
+            if self.retina:
+                for size_name, (size_w, size_h) in auto_sizes.items():
+                    retina_size_name = '%s@2x' % size_name
+                    auto_sizes.update({retina_size_name: (2*size_w, 2*size_h)})
 
         if not default_thumb_key_exists:
             raise ValueError("default_thumb attribute does not exist in either sizes or auto_sizes dict.")
@@ -280,7 +298,10 @@ class CropDusterField(GenericRelation):
         self.auto_sizes = auto_sizes
         self.default_thumb = default_thumb
 
-        kwargs['to'] = Image
+        kwargs['to'] = kwargs.pop('to', Image)
+        if kwargs['to'] == 'cropduster.Image':
+            kwargs['to'] = Image
+
         super(CropDusterField, self).__init__(verbose_name=verbose_name, **kwargs)
 
     def _sizes_validate(self, sizes, is_auto=False):
@@ -306,6 +327,17 @@ class CropDusterField(GenericRelation):
         defaults.update(kwargs)
         return super(CropDusterField, self).formfield(**defaults)
 
+    def south_init(self):
+        self._rel = self.rel
+        self.rel = None
+        self.south_executing = True
+
+    def post_create_sql(self, style, db_table):
+        self.south_executing = False
+        if self.rel is None and hasattr(self, '_rel'):
+            self.rel = self._rel
+        return []
+
 
 from .patch import patch_model_admin
 patch_model_admin()
@@ -329,6 +361,7 @@ else:
                 "sizes": ["sizes", {}],
                 "auto_sizes": ["auto_sizes", {"default": None}],
                 "default_thumb": ["default_thumb", {}],
+                'max_length': ["max_length", {"default": 100}],
             },
         ),
     ], patterns=["^cropduster\.models\.CropDusterField"])

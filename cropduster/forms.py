@@ -62,12 +62,29 @@ class CropDusterWidget(Input):
     def render(self, name, value, attrs=None):
         from jsonutil import jsonutil as json
         import simplejson
-        
-        final_attrs = self.build_attrs(attrs, type=self.input_type, name=name)
 
+        from .nested import nested_inline_formset_factory
+
+        final_attrs = self.build_attrs(attrs, type=self.input_type, name=name)
         # Whether we are rendering from the generated inline formset
         # or rendering on the actual form.
         is_formset_render = bool('content_type-object_id' in name)
+
+        is_nested = False
+
+        if name in self.field.seen_field_names:
+            return ''
+        else:
+            self.field.seen_field_names.add(name)
+
+        if '__prefix__' in name or '_set-' in name:
+            is_nested = True
+            CropDusterNestedInlineFormSet = nested_inline_formset_factory(self.formset)
+            self.formset = type('CropDusterNestedInlineFormSet',
+                (CropDusterNestedInlineFormSet,), {
+                    'sizes': self.sizes,
+                    'auto_sizes': self.auto_sizes,
+                    'default_thumb': self.default_thumb,})
 
         image = None
         image_value = ''
@@ -85,7 +102,7 @@ class CropDusterWidget(Input):
             image = value.cropduster_image
             image_value = value.name
             value = getattr(image, 'pk', None)
-        elif isinstance(value, basestring) and not value.isdigit():
+        elif value != '' and isinstance(value, basestring) and not value.isdigit():
             try:
                 image = Image.objects.get_by_relpath(value)
             except Image.DoesNotExist:
@@ -123,6 +140,7 @@ class CropDusterWidget(Input):
 
         static_url = simplejson.dumps(settings.MEDIA_URL + '/' + relative_path + '/')
         return render_to_string("cropduster/custom_field.html", {
+            'is_nested': is_nested,
             'image_value': image_value,
             'is_formset_render': is_formset_render,
             'formset': self.formset,
@@ -146,6 +164,10 @@ class CropDusterFormField(forms.Field):
     default_thumb = None
 
     def __init__(self, sizes=None, auto_sizes=None, default_thumb=None, *args, **kwargs):
+        # Used to keep track of field names rendered by the widget, so as not
+        # render them twice
+        self.seen_field_names = set([])
+
         if not sizes and self.sizes:
             sizes = self.sizes
         if not auto_sizes and self.auto_sizes:
@@ -245,7 +267,7 @@ class CropDusterThumbField(ModelMultipleChoiceField):
 class CropDusterForm(forms.ModelForm):
 
     model = Image
-    
+
     @staticmethod
     def formfield_for_dbfield(db_field, **kwargs):
         if isinstance(db_field, related.ManyToManyField) and db_field.column == 'thumbs':
@@ -334,14 +356,15 @@ class AbstractInlineFormSet(GenericInlineFormSet):
         return form
 
 
-def cropduster_formset_factory(sizes=None, auto_sizes=None, default_thumb=None):
-    ct_field = Image._meta.get_field("content_type")
-    ct_fk_field = Image._meta.get_field("object_id")
+def cropduster_formset_factory(sizes=None, auto_sizes=None, default_thumb=None,
+                               model_cls=Image, is_nested=False):
+    ct_field = model_cls._meta.get_field("content_type")
+    ct_fk_field = model_cls._meta.get_field("object_id")
     
     exclude = [ct_field.name, ct_fk_field.name]
     
-    form = type('CropDusterForm', (CropDusterForm,), {
-        "model": Image,
+    attrs = {
+        "model": model_cls,
         "formfield_overrides": {
             Thumb: {
                 'form_class': CropDusterThumbField,
@@ -352,9 +375,16 @@ def cropduster_formset_factory(sizes=None, auto_sizes=None, default_thumb=None):
             "formfield_callback": CropDusterForm.formfield_for_dbfield,
             "fields": AbstractInlineFormSet.fields,
             "exclude": exclude,
-            "model": Image,
+            "model": model_cls,
+        }),
+    }
+
+    if is_nested:
+        attrs.update({
+            "position": forms.IntegerField(required=False, widget=forms.HiddenInput()),
         })
-    })
+
+    form = type('CropDusterForm', (CropDusterForm,), attrs)
     
     inline_formset_attrs = {
         "formfield_callback": CropDusterForm.formfield_for_dbfield,
