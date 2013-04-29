@@ -45,6 +45,8 @@ def get_image_extension(img):
 def get_aspect_ratios(dims):
     ratios = []
     for name in dims.keys():
+        if len(name) > 3 and name[-3:] == '@2x':
+            continue
         (w, h) = dims[name]
         ratio = round(w / h, 2)
         ratio = Decimal(str(ratio)).quantize(Decimal('.1'), rounding=ROUND_HALF_DOWN)
@@ -78,6 +80,8 @@ def get_largest_size(sizes):
     max_w = 0
     max_h = 0
     for size_name, size in sizes.items():
+        if len(size_name) > 3 and size_name[-3:] == '@2x':
+            continue
         (w, h) = size
         max_w = max(w, max_w)
         max_h = max(h, max_h)

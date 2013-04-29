@@ -1,4 +1,4 @@
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, ImproperlyConfigured
 from django.core.files.base import File
 from django.db import connection, models
 from django.db import router, DEFAULT_DB_ALIAS
@@ -53,6 +53,7 @@ class GenericRelation(RelatedField, Field):
             'blank': True,
             'editable': True,
             'serialize': False,
+            'max_length': self.image_kwargs['max_length'],
         })
 
         Field.__init__(self, **kwargs)
@@ -120,12 +121,18 @@ class GenericRelation(RelatedField, Field):
         pass
 
     def get_internal_type(self):
-        return "ManyToManyField"
+        if self.south_executing:
+            return "FileField"
+        else:
+            return "ManyToManyField"
 
     def db_type(self, connection):
-        # Since we're simulating a ManyToManyField, in effect, best return the
-        # same db_type as well.
-        return None
+        if self.south_executing:
+            return super(GenericRelation, self).db_type(connection=connection)
+        else:
+            # Since we're simulating a ManyToManyField, in effect, best return
+            # the same db_type as well.
+            return None
 
     def extra_filters(self, pieces, pos, negate):
         """
@@ -179,10 +186,18 @@ class CropDusterDescriptor(object):
         except AttributeError:
             # This import is done here to avoid circular import importing this module
             from django.contrib.contenttypes.models import ContentType
+            from .models import Image
 
             # Dynamically create a class that subclasses the related model's
             # default manager.
             rel_model = self.field.rel.to
+
+            if not issubclass(rel_model, Image):
+                raise ImproperlyConfigured(
+                    (u"CropDusterField `to` kwarg value must be %(cls_name) or "
+                     u" a subclass of %(cls_name)") % {
+                        'cls_name': 'cropduster.models.Image'})
+
             superclass = rel_model._default_manager.__class__
             RelatedManager = create_generic_related_manager(superclass)
 

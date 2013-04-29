@@ -1,7 +1,9 @@
 import re
 from django.contrib.contenttypes.generic import BaseGenericInlineFormSet
 
+
 class GenericInlineFormSet(BaseGenericInlineFormSet):
+
     def _construct_form(self, i, **kwargs):
         """
         Override the id field of the form with our BetaMaxedFormField
@@ -31,6 +33,7 @@ class GenericInlineFormSet(BaseGenericInlineFormSet):
             self._queryset = queryset
         
         self._pre_construct_form(i, **kwargs)
+
         form = super(GenericInlineFormSet, self)._construct_form(i, **kwargs)
         form = self._post_construct_form(form, i, **kwargs)
         
@@ -46,7 +49,20 @@ class GenericInlineFormSet(BaseGenericInlineFormSet):
                             field = form.fields[field_name]
                             field.initial = self.data.get(key)
         return form
-    
+
+    def _existing_object(self, pk):
+        if not hasattr(self, '_object_dict'):
+            self._object_dict = dict([(o.pk, o) for o in self.get_queryset()])
+        obj = self._object_dict.get(pk)
+        if not obj:
+            try:
+                obj = self.model._default_manager.get(pk=pk)
+            except self.model.DoesNotExist:
+                pass
+            else:
+                self._object_dict[pk] = obj
+        return obj
+
     def _pre_construct_form(self, i, **kwargs):
         pass
     

@@ -6,7 +6,7 @@ import sys
 
 from django import forms
 from django.conf import settings
-from django.http import HttpResponse, HttpResponseServerError, Http404, HttpResponseNotModified
+from django.http import HttpResponse, HttpResponseServerError
 from django.shortcuts import render_to_response
 from django.template import RequestContext
 from django.core.cache import cache
@@ -17,17 +17,22 @@ from jsonutil import jsonutil
 
 import PIL.Image
 
-from cropduster.handlers import UploadProgressCachedHandler
-from cropduster.utils import *
-from cropduster.models import Image as CropDusterImage
-from cropduster.settings import *
-from cropduster.exceptions import *
+# from .handlers import UploadProgressCachedHandler
+from .utils import (OrderedDict, relpath, rescale, get_upload_foldername,
+                    get_min_size, get_media_url, get_relative_media_url,
+                    get_image_extension, get_media_path, create_cropped_image,)
+from .models import Image as CropDusterImage
+from .exceptions import (CropDusterException, CropDusterUrlException,
+                         CropDusterViewException,)
 
 import simplejson
 import re
 
 import logging
 from sentry.client.handlers import SentryHandler
+
+from .settings import CROPDUSTER_MEDIA_ROOT
+
 
 logger = logging.getLogger('root')
 logger.addHandler(SentryHandler())
@@ -52,49 +57,52 @@ def upload(request):
             'image_element_id': image_element_id,
             'image': os.path.join(media_url, 'img/blank.gif'),
             'orig_image': '',
-            'x': 0,
-            'y': 0,
-            'w': 0,
-            'h': 0
+            'x': request.GET.get('x', 0),
+            'y': request.GET.get('y', 0),
+            'w': request.GET.get('w', 0),
+            'h': request.GET.get('h', 0)
         }
-        
-        try:
-            context_data['x'] = request.GET['x']
-            context_data['y'] = request.GET['y']
-            context_data['w'] = request.GET['w']
-            context_data['h'] = request.GET['h']
-        except:
-            pass
-        
-        try:
-            image_id = request.GET['id']
-            image = CropDusterImage.objects.get(pk=image_id)
-            context_data['image_id'] = image.pk
-            context_data['orig_image'] = os.path.join(image.path, 'original' + image.extension)
-            # @todo Check that orig_image exists, as cropping won't work
-            # in the next step if it doesn't
 
-            context_data['image'] = image.get_image_url('_preview')
+        image_id = request.GET.get('id', None)
+        if image_id is not None:
+            try:
+                image_id = int(image_id)
+            except (TypeError, ValueError):
+                pass
+            else:
+                try:
+                    image = CropDusterImage.objects.get(pk=image_id)
+                except CropDusterImage.DoesNotExist:
+                    pass
+                else:
+                    context_data['image_id'] = image.pk
+                    context_data['orig_image'] = os.path.join(image.path, 'original' + image.extension)
+                    # @todo Check that orig_image exists, as cropping won't work
+                    # in the next step if it doesn't
 
-            (orig_w, orig_h) = image.get_image_size()
-            context_data['orig_w'] = orig_w
-            context_data['orig_h'] = orig_h
-        except:
-            pass
-        
+                    context_data['image'] = image.get_image_url('_preview')
+
+                    (orig_w, orig_h) = image.get_image_size()
+                    context_data['orig_w'] = orig_w
+                    context_data['orig_h'] = orig_h
+
         # If we have a new image that hasn't been saved yet
         try:
             path = request.GET['path']
-            root_path = os.path.join(settings.STATIC_ROOT, path)
+            root_path = os.path.join(settings.CROPDUSTER_UPLOAD_PATH, path)
             ext = request.GET['ext']
-            if os.path.exists(os.path.join(root_path, '_preview' + '.' + ext)):
+            preview_path = os.path.join(root_path, '_preview' + '.' + ext)
+            if os.path.exists(preview_path):
                 orig_image = os.path.join(path, 'original' + '.' + ext)
                 context_data['orig_image'] = orig_image
-                preview_url = settings.STATIC_URL + '/' + path + '/_preview' + '.' + ext
+
+                relative_path = relpath(settings.MEDIA_ROOT, settings.CROPDUSTER_UPLOAD_PATH)
+                url_root = settings.MEDIA_URL + '/' + relative_path + '/'
+                preview_url = url_root + path + '/_preview.' +  ext
                 # Remove double '/'s
                 preview_url = re.sub(r'(?<!:)/+', '/', preview_url)
                 context_data['image'] = preview_url
-                img = PIL.Image.open(os.path.join(settings.STATIC_ROOT, orig_image))
+                img = PIL.Image.open(os.path.join(settings.CROPDUSTER_UPLOAD_PATH, orig_image))
                 (orig_w, orig_h) = img.size
                 context_data['orig_w'] = orig_w
                 context_data['orig_h'] = orig_h
@@ -249,7 +257,6 @@ def _log_error(request, view, action, errors):
         pass
     
     if error_type == 'CropDusterUrlException':
-        from django.contrib import admin
         from django.core.urlresolvers import get_urlconf,get_resolver
         from django.utils.encoding import force_unicode
         urlconf = get_urlconf()
@@ -305,7 +312,7 @@ def _json_error(request, view, action, errors, log_error=False):
         error_msg =  "Errors %s: " % action
         error_msg += "<ul>"
         for error in errors:
-            error_msg += "<li>&nbsp;&nbsp;&nbsp;&bull;&nbsp;%s</li>" % format_error(error)
+            error_msg += "<li>&nbsp;&nbsp;&nbsp;&bull;&nbsp;%s</li>" % _format_error(error)
         error_msg += "</ul>"
     data = {
         'error': error_msg
@@ -459,10 +466,16 @@ def _generate_and_save_thumbs(db_image, sizes, img, file_dir, file_ext, is_auto=
     if img.format == 'JPEG':
         img_save_params['quality'] = 95
 
+    (orig_w, orig_h) = img.size
+
     for size_name in sizes:
         size = sizes[size_name]
         thumb_w = int(size[0])
         thumb_h = int(size[1])
+
+        if len(size_name) > 3 and size_name[-3:] == '@2x':
+            if thumb_w > orig_w or thumb_h > orig_h:
+                continue
 
         thumb = img.copy()
         if is_auto is False:
