@@ -25,11 +25,6 @@ setup(
     packages=['cropduster'],
     zip_safe=False,
     install_requires=[
-        'Pillow',
-        'jsonutil',
-        'Django>=1.2',
-        'python-xmp-toolkit<2.0.0',
-        'django-generic-plus>=1.0.9',
         'six>=1.7.0',
     ],
     include_package_data=True,
