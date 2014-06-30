@@ -28,11 +28,14 @@ except:
             u"cropduster.standalone used, but exempi shared library not installed")
 
 
+exempi = getattr(libxmp, '_exempi', libxmp.exempi.EXEMPI)
+
+
 if not libxmp:
     check_file_format = get_format_info = None
 else:
-    check_file_format = libxmp._exempi.xmp_files_check_file_format
-    get_format_info = libxmp._exempi.xmp_files_get_format_info
+    check_file_format = exempi.xmp_files_check_file_format
+    get_format_info = exempi.xmp_files_get_format_info
 
     if not check_file_format.argtypes:
         check_file_format.argtypes = [ctypes.c_char_p]
